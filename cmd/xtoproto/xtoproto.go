@@ -19,12 +19,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"bytes"
 
+	"github.com/google/xtoproto/xmlinfer"
 	"github.com/google/xtoproto/service"
 	"google.golang.org/protobuf/encoding/prototext"
 
@@ -54,6 +57,7 @@ var (
 type config struct {
 	defaultWorkspaceDir         string
 	csvPath                     string
+	xmlPath                     string
 	codegenRequestPath          string
 	overrideConverterOutputPath string
 	codegenRequestJSON          string
@@ -63,6 +67,7 @@ func registerFlags(fs *flag.FlagSet) *config {
 	cfg := &config{}
 	fs.StringVar(&cfg.defaultWorkspaceDir, "default_workspace", "/tmp/example-workspace", "default workspace directory")
 	fs.StringVar(&cfg.csvPath, "csv", "", "path to input csv file")
+	fs.StringVar(&cfg.xmlPath, "xml", "", "path to input xml file") // Aggiunto flag -xml
 	fs.StringVar(&cfg.codegenRequestPath, "codegen_request", "", "if specified, a prototext-encoded GenerateCodeRequest to be issued")
 	fs.StringVar(&cfg.overrideConverterOutputPath, "codegen_convert_go_out", "", "path to output Go file - overrides value in codegen_request")
 	fs.StringVar(&cfg.codegenRequestJSON, "codegen_request_json", "", "JSON request from bazel")
@@ -72,7 +77,7 @@ func registerFlags(fs *flag.FlagSet) *config {
 func main() {
 	flag.Parse()
 	if err := run(context.Background()); err != nil {
-		fmt.Fprintf(os.Stderr, "fatal xtoproto error: %v", err)
+		fmt.Fprintf(os.Stderr, "fatal xtoproto error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -84,44 +89,64 @@ func run(ctx context.Context) error {
 		return runConverterCodeGen(ctx, s)
 	}
 
-	resp1, err := s.Infer(ctx, &spb.InferRequest{
-		GoPackageName: "example",
-		GoProtoImport: "not/sure",
-		InputFormat:   spb.Format_CSV,
-		MessageName:   "MyMessage",
-		PackageName:   "mypackage",
-		ExampleInputs: []*spb.InputFile{
-			{
-				Spec: &spb.InputFile_InputPath{
-					InputPath: cfg.csvPath,
+	if cfg.csvPath != "" {
+		resp1, err := s.Infer(ctx, &spb.InferRequest{
+			GoPackageName: "example",
+			GoProtoImport: "not/sure",
+			InputFormat:   spb.Format_CSV,
+			MessageName:   "MyMessage",
+			PackageName:   "mypackage",
+			ExampleInputs: []*spb.InputFile{
+				{
+					Spec: &spb.InputFile_InputPath{
+						InputPath: cfg.csvPath,
+					},
 				},
 			},
-		},
-	})
-	if err != nil {
-		return err
-	}
-	fmt.Printf("InferResponse:\n%s\n", prototext.Format(resp1))
-	req2 := &spb.GenerateCodeRequest{
-		Mapping: resp1.GetBestMappingCandidate().GetTopLevelMapping(),
-		ProtoDefinition: &spb.GenerateCodeRequest_ProtoDefinition{
-			Directory:        "generated",
-			ProtoFileName:    "example.proto",
-			UpdateBuildRules: true,
-		},
-		Converter: &spb.GenerateCodeRequest_Converter{
-			Directory:        "generated",
-			GoFileName:       "exampleconv.go",
-			UpdateBuildRules: true,
-		},
-	}
-	fmt.Printf("GenerateCodeRequest:\n%s\n", prototext.Format(req2))
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("InferResponse:\n%s\n", prototext.Format(resp1))
+		req2 := &spb.GenerateCodeRequest{
+			Mapping: resp1.GetBestMappingCandidate().GetTopLevelMapping(),
+			ProtoDefinition: &spb.GenerateCodeRequest_ProtoDefinition{
+				Directory:        "generated",
+				ProtoFileName:    "example.proto",
+				UpdateBuildRules: true,
+			},
+			Converter: &spb.GenerateCodeRequest_Converter{
+				Directory:        "generated",
+				GoFileName:       "exampleconv.go",
+				UpdateBuildRules: true,
+			},
+		}
+		fmt.Printf("GenerateCodeRequest:\n%s\n", prototext.Format(req2))
 
-	resp2, err := s.GenerateCode(ctx, req2)
-	if err != nil {
-		return err
+		resp2, err := s.GenerateCode(ctx, req2)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("GenerateCodeResponse:\n%s\n", prototext.Format(resp2))
+	} else if cfg.xmlPath != "" {
+		contents, err := readFile(ctx, cfg.xmlPath)
+		if err != nil {
+			return err
+		}
+
+		decoder := xml.NewDecoder(bytes.NewReader(contents))
+		res, err := xmlinfer.Infer(decoder)
+		if err != nil {
+			return err
+		}
+		
+		protoCode, err := res.ProtoFile()
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("%s\n", protoCode)
 	}
-	fmt.Printf("GenerateCodeResponse:\n%s\n", prototext.Format(resp2))
 
 	return nil
 }

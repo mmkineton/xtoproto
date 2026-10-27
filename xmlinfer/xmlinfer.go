@@ -117,6 +117,18 @@ func (sc *structCandidate) inferredMessages() ([]*builder.MessageBuilder, error)
 		b.AddField(attrField)
 	}
 
+	ft, err := inferFieldTypeFromExampleStrings(sc.chardataField.sampleValueCounts)
+	if err != nil {
+		return nil, err
+	}
+	
+	innerTextFld := builder.NewField("innerValue", ft)
+	innerTextFld.SetComments(builder.Comments{
+		LeadingComment: topNExamplesComment(sc.chardataField.sampleValueCounts),
+	})
+	
+	b.AddField(innerTextFld)
+
 	all := []*builder.MessageBuilder{b}
 
 	for _, ef := range sc.elemFields {

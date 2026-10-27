@@ -6,6 +6,7 @@ go_library(
     importpath = "github.com/google/xtoproto/cmd/xtoproto",
     visibility = ["//visibility:private"],
     deps = [
+        "//xmlinfer",
         "//proto/service",
         "//service",
         "@org_golang_google_protobuf//encoding/prototext",
